@@ -97,7 +97,6 @@ jobs:
         run: |
           {
             echo "CREATE AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}"
-            echo "  COMMENT = 'Created from GitHub Actions (${GITHUB_SHA})'"
             echo "  FROM SPECIFICATION"
             echo "\$\$"
             cat "cortex_agents/${AGENT_NAME}/agent_spec.yaml"
@@ -117,10 +116,20 @@ jobs:
 
       - name: Set alias and default
         run: |
+          # SHOW VERSIONS から最新の named バージョンを解決する
+          version=$(snow sql --temporary-connection --format json -q "
+            SHOW VERSIONS IN AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME};
+          " | jq -r 'map(select(.name != null)) | max_by(.created_on) | .name')
+          if [ -z "${version}" ] || [ "${version}" = "null" ]; then
+            echo "::error::No named version found for ${AGENT_NAME}"
+            exit 1
+          fi
+          echo "Latest version: ${version}"
+
           snow sql --temporary-connection -q "
             ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
-              MODIFY VERSION LAST SET ALIAS = production;
+              MODIFY VERSION ${version} SET ALIAS = production;
 
             ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
-              SET DEFAULT_VERSION = LAST;
+              SET DEFAULT_VERSION = '${version}';
           "
