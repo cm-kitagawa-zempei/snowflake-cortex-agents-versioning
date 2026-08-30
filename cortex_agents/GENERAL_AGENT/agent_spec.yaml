@@ -13,3 +13,4 @@ tool_resources:
   code_toolset_all:
     permission_policy:
       type: "always_ask"
+
