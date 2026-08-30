@@ -12,4 +12,4 @@ tools:
 tool_resources:
   code_toolset_all:
     permission_policy:
-      type: "always_allow"
+      type: "always_ask"
