@@ -36,17 +36,23 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Detect target agents
         id: targets
         env:
           INPUT_AGENT_NAME: ${{ inputs.agent_name }}
+          BEFORE_SHA: ${{ github.event.before }}
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             agents=$(jq -cn --arg a "${INPUT_AGENT_NAME}" '[$a]')
+          elif git cat-file -e "${BEFORE_SHA}" 2> /dev/null; then
+            # push 前のコミットと比較
+            agents=$(git diff --name-only --diff-filter=d "${BEFORE_SHA}" HEAD -- 'cortex_agents/*/agent_spec.yaml' \
+              | cut -d/ -f2 | sort -u | jq -Rnc '[inputs]')
           else
-            agents=$(git diff --name-only HEAD^ HEAD -- 'cortex_agents/*/agent_spec.yaml' \
+            # 比較元が無い場合、全エージェントを対象にする
+            agents=$(git ls-files 'cortex_agents/*/agent_spec.yaml' \
               | cut -d/ -f2 | sort -u | jq -Rnc '[inputs]')
           fi
           echo "Target agents: ${agents}"
