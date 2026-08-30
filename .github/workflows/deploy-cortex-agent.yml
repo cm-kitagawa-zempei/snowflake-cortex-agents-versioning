@@ -77,13 +77,41 @@ jobs:
             --overwrite \
             --temporary-connection
 
-      - name: Add version, set alias and default
+      - name: Check if agent exists
+        id: check
+        run: |
+          count=$(snow sql --temporary-connection --format json -q "
+            SHOW AGENTS LIKE '${AGENT_NAME}' IN SCHEMA ${AGENT_DATABASE}.${AGENT_SCHEMA};
+          " | jq 'length')
+          echo "exists=$([ "${count}" -gt 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      # 初回デプロイ: エージェント作成（VERSION$1 が自動コミットされる）
+      - name: Create agent (first deploy)
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          {
+            echo "CREATE AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}"
+            echo "  COMMENT = 'Created from GitHub Actions (${GITHUB_SHA})'"
+            echo "  FROM SPECIFICATION"
+            echo "\$\$"
+            cat "cortex_agents/${AGENT_NAME}/agent_spec.yaml"
+            echo "\$\$;"
+          } > create_agent.sql
+          snow sql --temporary-connection -f create_agent.sql
+
+      # 2回目以降: ステージから新バージョンを追加
+      - name: Add version
+        if: steps.check.outputs.exists == 'true'
         run: |
           snow sql --temporary-connection -q "
             ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
               ADD VERSION FROM @${AGENT_DATABASE}.${AGENT_SCHEMA}.${STAGE_NAME}/${AGENT_NAME}
               COMMENT = 'Deployed from GitHub Actions (${GITHUB_SHA})';
+          "
 
+      - name: Set alias and default
+        run: |
+          snow sql --temporary-connection -q "
             ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
               MODIFY VERSION LAST SET ALIAS = production;
 
