@@ -1,0 +1,92 @@
+name: Deploy Cortex Agent
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cortex_agents/*/agent_spec.yaml"
+  workflow_dispatch:
+    inputs:
+      agent_name:
+        description: "Deploy target agent name (cortex_agents/<AGENT_NAME>)"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  # 接続情報
+  SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
+  # デプロイ先
+  AGENT_DATABASE: KITAGAWA_TEST_DB
+  AGENT_SCHEMA: AGENT_PROD
+  STAGE_NAME: AGENT_SPECS
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      agents: ${{ steps.targets.outputs.agents }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Detect target agents
+        id: targets
+        env:
+          INPUT_AGENT_NAME: ${{ inputs.agent_name }}
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            agents=$(jq -cn --arg a "${INPUT_AGENT_NAME}" '[$a]')
+          else
+            agents=$(git diff --name-only HEAD^ HEAD -- 'cortex_agents/*/agent_spec.yaml' \
+              | cut -d/ -f2 | sort -u | jq -Rnc '[inputs]')
+          fi
+          echo "Target agents: ${agents}"
+          echo "agents=${agents}" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: detect
+    if: needs.detect.outputs.agents != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        agent_name: ${{ fromJSON(needs.detect.outputs.agents) }}
+    env:
+      AGENT_NAME: ${{ matrix.agent_name }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Snowflake CLI
+        uses: snowflakedb/snowflake-actions@v3
+        with:
+          use-oidc: true
+
+      - name: Copy agent spec file to stage
+        run: |
+          snow stage copy \
+            "cortex_agents/${AGENT_NAME}/agent_spec.yaml" \
+            "@${AGENT_DATABASE}.${AGENT_SCHEMA}.${STAGE_NAME}/${AGENT_NAME}/" \
+            --overwrite \
+            --temporary-connection
+
+      - name: Add version, set alias and default
+        run: |
+          snow sql --temporary-connection -q "
+            ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
+              ADD VERSION FROM @${AGENT_DATABASE}.${AGENT_SCHEMA}.${STAGE_NAME}/${AGENT_NAME}
+              COMMENT = 'Deployed from GitHub Actions (${GITHUB_SHA})';
+
+            ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
+              MODIFY VERSION LAST SET ALIAS = production;
+
+            ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
+              SET DEFAULT_VERSION = LAST;
+          "
