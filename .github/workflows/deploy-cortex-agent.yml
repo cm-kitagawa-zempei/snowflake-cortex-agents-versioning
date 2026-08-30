@@ -108,6 +108,17 @@ jobs:
       - name: Add version
         if: steps.check.outputs.exists == 'true'
         run: |
+          # live バージョンが残っていると ADD VERSION が失敗するため、先に COMMIT する。
+          live=$(snow sql --temporary-connection --format json -q "
+            SHOW VERSIONS IN AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME};
+          " | jq 'map(select(.name == null)) | length')
+          if [ "${live}" -gt 0 ]; then
+            snow sql --temporary-connection -q "
+              ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
+                COMMIT COMMENT = 'Auto-commit leftover live version';
+            "
+          fi
+
           snow sql --temporary-connection -q "
             ALTER AGENT ${AGENT_DATABASE}.${AGENT_SCHEMA}.${AGENT_NAME}
               ADD VERSION FROM @${AGENT_DATABASE}.${AGENT_SCHEMA}.${STAGE_NAME}/${AGENT_NAME}
