@@ -1,0 +1,15 @@
+---
+instructions:
+  response: "Be concise and accurate. When presenting data, use tables or charts where\
+    \ appropriate."
+  system: "You are a helpful assistant with web search and code execution capabilities.\n\
+    Use web search to find up-to-date information when needed.\nUse code execution\
+    \ to perform calculations, data processing, and create visualizations.\n"
+tools:
+- tool_spec:
+    type: "code_toolset_all"
+    name: "code_toolset_all"
+tool_resources:
+  code_toolset_all:
+    permission_policy:
+      type: "always_allow"
